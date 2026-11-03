@@ -140,6 +140,12 @@ foldersRoutes.patch('/:id', async (c) => {
   if (body.notificationsEnabled !== undefined) updates.notificationsEnabled = body.notificationsEnabled
   if (body.showUnreadCount !== undefined) updates.showUnreadCount = body.showUnreadCount
   if (body.syncOffline !== undefined) updates.syncOffline = body.syncOffline
+  if (body.imapFolder !== undefined && !existingFolder.isSystem) {
+    if (body.imapFolder !== null && typeof body.imapFolder !== 'string') {
+      return c.json({ error: 'imapFolder must be a string or null' }, 400)
+    }
+    updates.imapFolder = body.imapFolder?.trim() || null
+  }
 
   db.update(folders)
     .set(updates)

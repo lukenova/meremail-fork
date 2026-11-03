@@ -5,6 +5,7 @@ import {
   importEmail,
   deleteRetrieved,
   toDate,
+  mappedImapFolders,
   config,
   type FetchedEmail,
 } from '@meremail/shared'
@@ -373,9 +374,14 @@ class ImapIdleService {
       pollClient = await createImapClient()
       const availableFolders = await this.listFolders(pollClient)
 
-      // Filter to folders we want to poll
+      // Filter to folders we want to poll: Sent and Junk, plus any IMAP
+      // folder mapped to a Meremail folder (INBOX is watched with IDLE)
+      const mapped = mappedImapFolders()
       const foldersToSync = availableFolders.filter(folder =>
-        POLL_FOLDERS.some(pf => folder.toLowerCase() === pf.toLowerCase())
+        folder.toUpperCase() !== 'INBOX' && (
+          POLL_FOLDERS.some(pf => folder.toLowerCase() === pf.toLowerCase()) ||
+          mapped.includes(folder)
+        )
       )
 
       for (const folder of foldersToSync) {
