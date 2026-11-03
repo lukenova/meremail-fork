@@ -189,6 +189,21 @@ export class ImapSync {
     this.requestTimer = setTimeout(() => this.run(), REQUEST_DELAY)
   }
 
+  /**
+   * Check the mail server straight away and wait for it, e.g. when the user
+   * presses Refresh. Returns false when two-way sync is off.
+   */
+  async now(): Promise<boolean> {
+    if (this.mode() === 'off' || !this.timer) return false
+    if (this.requestTimer) clearTimeout(this.requestTimer)
+    this.requestTimer = null
+    // A pass already under way may have started before the user's latest
+    // change; wait for it and run a fresh one
+    while (this.running) await new Promise((resolve) => setTimeout(resolve, 250))
+    await this.run()
+    return true
+  }
+
   async run(): Promise<void> {
     if (this.running) {
       this.again = true
@@ -651,4 +666,8 @@ export function stopImapSync(): void {
 
 export function requestImapSync(): void {
   imapSync.request()
+}
+
+export function imapSyncNow(): Promise<boolean> {
+  return imapSync.now()
 }

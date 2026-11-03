@@ -10,7 +10,7 @@ import { db, config, draftAttachments, resolveAttachmentPath } from '@meremail/s
 import type { SyncAction, SyncDraftAttachment } from '@meremail/shared'
 import { bootstrap, changes, fetchThreads, folderPage } from '../sync/feed'
 import { applyActions } from '../sync/actions'
-import { requestImapSync } from '../services/imap-sync'
+import { requestImapSync, imapSyncNow } from '../services/imap-sync'
 
 export const syncRoutes = new Hono()
 export const draftAttachmentsRoutes = new Hono()
@@ -22,6 +22,17 @@ const MAX_ACTIONS_PER_BATCH = 100
 // Starting snapshot for a client with no local data
 syncRoutes.get('/bootstrap', (c) => {
   return c.json(bootstrap())
+})
+
+// POST /api/sync/refresh
+// Check the mail server for changes now, rather than at the next interval.
+// Answers once that's done (or after 60s, leaving it to finish in the background).
+syncRoutes.post('/refresh', async (c) => {
+  const done = imapSyncNow().then((ran) => ({ ran, finished: true }))
+  const late = new Promise<{ ran: boolean; finished: boolean }>((resolve) =>
+    setTimeout(() => resolve({ ran: true, finished: false }), 60000)
+  )
+  return c.json(await Promise.race([done, late]))
 })
 
 // GET /api/sync/changes?since=<cursor>

@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, watch, ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, watch, ref } from 'vue'
 import { RouterLink, useRoute, useRouter, type LocationQuery, type LocationQueryRaw } from 'vue-router'
 import ThreadList from '@/components/ThreadList.vue'
+import RefreshButton from '@/components/RefreshButton.vue'
 import FolderNav from '@/components/FolderNav.vue'
-import FolderSidebar from '@/components/FolderSidebar.vue'
-import ThreadPage from '@/pages/ThreadPage.vue'
-import { useWideLayout } from '@/composables/useWideLayout'
+import ReaderPane from '@/components/ReaderPane.vue'
+import PaneResizer from '@/components/PaneResizer.vue'
+import { useReadingPane } from '@/composables/useReadingPane'
+import { usePaneWidth, LIST_WIDTH } from '@/composables/usePaneWidth'
 import SearchToolbar from '@/components/SearchToolbar.vue'
 import { db } from '@/local/db'
 import { useLiveQuery } from '@/local/live'
@@ -46,26 +48,6 @@ function searchToQuery(search: string | null): LocationQueryRaw {
 
 // ============== Three-pane layout (wide windows) ==============
 
-const wide = useWideLayout()
-
-// The thread open in the reading pane lives in the URL (?t=...), so Back and
-// Forward step through what was read and a reload keeps it open
-const openThreadId = computed(() => {
-  const id = Number(queryString(route.query.t))
-  return wide.value && Number.isInteger(id) && id > 0 ? id : null
-})
-
-function threadQuery(threadId: number | null): LocationQueryRaw {
-  const query: LocationQueryRaw = { ...route.query }
-  if (threadId === null) delete query.t
-  else query.t = String(threadId)
-  return query
-}
-
-function readerLink(threadId: number) {
-  return { query: threadQuery(threadId) }
-}
-
 // Threads in the list, in order, for stepping through with the keyboard
 const listIds = ref<number[]>([])
 const visibleIds = computed(() =>
@@ -74,40 +56,8 @@ const visibleIds = computed(() =>
     : listIds.value
 )
 
-function openNeighbour(step: 1 | -1) {
-  const ids = visibleIds.value
-  if (ids.length === 0) return
-  const at = openThreadId.value === null ? -1 : ids.indexOf(openThreadId.value)
-  const next = at === -1 ? (step === 1 ? 0 : ids.length - 1) : at + step
-  if (next < 0 || next >= ids.length) return
-  router.replace({ query: threadQuery(ids[next]!) })
-}
-
-// The open thread was trashed or deleted: move on to the next one
-function onReaderClose() {
-  const ids = visibleIds.value
-  const at = openThreadId.value === null ? -1 : ids.indexOf(openThreadId.value)
-  const next = at === -1 ? null : (ids[at + 1] ?? ids[at - 1] ?? null)
-  router.replace({ query: threadQuery(next) })
-}
-
-function onKeydown(e: KeyboardEvent) {
-  if (!wide.value || e.metaKey || e.ctrlKey || e.altKey) return
-  const target = e.target as HTMLElement | null
-  if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
-  if (e.key === 'j' || e.key === 'ArrowDown') {
-    e.preventDefault()
-    openNeighbour(1)
-  } else if (e.key === 'k' || e.key === 'ArrowUp') {
-    e.preventDefault()
-    openNeighbour(-1)
-  } else if (e.key === 'Escape' && openThreadId.value !== null) {
-    router.replace({ query: threadQuery(null) })
-  }
-}
-
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+const { wide, openThreadId, readerLink, onRemoving, onReaderClose } = useReadingPane(visibleIds)
+const listWidth = usePaneWidth('meremail.listWidth', LIST_WIDTH, 280, 900)
 
 // Search state
 const searchText = ref<string | null>(searchFromQuery(route.query))
@@ -308,12 +258,14 @@ watch(() => route.query, (query) => {
 </script>
 
 <template>
-  <div class="page" :class="{ split: wide }">
-    <FolderSidebar v-if="wide" :active-folder-id="currentFolderId" />
+  <div class="page" :class="{ split: wide }" :style="wide ? { gridTemplateColumns: `${listWidth}px 1px minmax(0, 1fr)` } : undefined">
 
     <section class="list-pane">
     <header class="header">
-      <h1>{{ pageTitle }}</h1>
+      <div class="title-row">
+        <h1>{{ pageTitle }}</h1>
+        <RefreshButton />
+      </div>
       <FolderNav v-if="!wide" :active-folder-id="currentFolderId" />
     </header>
 
@@ -411,24 +363,13 @@ watch(() => route.query, (query) => {
         :active-id="openThreadId"
         empty-message="No threads yet"
         @threads="listIds = $event"
+        @removing="onRemoving"
       />
     </main>
     </section>
 
-    <section v-if="wide" class="reader-pane">
-      <ThreadPage
-        v-if="openThreadId !== null"
-        :key="openThreadId"
-        :thread-id="openThreadId"
-        embedded
-        @close="onReaderClose"
-      />
-      <div v-else class="reader-empty">
-        <div class="reader-empty-icon">✉️</div>
-        <div>Select a message to read it</div>
-        <div class="reader-empty-hint">Tip: <kbd>j</kbd> / <kbd>k</kbd> or the arrow keys move between messages</div>
-      </div>
-    </section>
+    <PaneResizer v-if="wide" v-model="listWidth" :min="280" :max="900" :default-width="LIST_WIDTH" />
+    <ReaderPane v-if="wide" :thread-id="openThreadId" @close="onReaderClose" />
   </div>
 </template>
 
@@ -438,10 +379,9 @@ watch(() => route.query, (query) => {
   padding-bottom: 80px;
 }
 
-/* Three panes: folders | list | message */
+/* Wide windows: list | message (the folders are beside them, in App) */
 .page.split {
   display: grid;
-  grid-template-columns: 230px minmax(340px, 420px) 1fr;
   height: 100vh;
   min-height: 0;
   padding-bottom: 0;
@@ -450,8 +390,8 @@ watch(() => route.query, (query) => {
 
 .page.split .list-pane {
   height: 100vh;
+  min-width: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--c-e5e5e5);
 }
 
 .page.split .header {
@@ -460,38 +400,6 @@ watch(() => route.query, (query) => {
 
 .page.split .header h1 {
   margin: 0;
-}
-
-.reader-pane {
-  height: 100vh;
-  overflow-y: auto;
-}
-
-.reader-empty {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: var(--c-text-999999);
-  font-size: 15px;
-}
-
-.reader-empty-icon {
-  font-size: 40px;
-  opacity: 0.5;
-}
-
-.reader-empty-hint {
-  font-size: 12px;
-}
-
-.reader-empty kbd {
-  padding: 1px 5px;
-  border: 1px solid var(--c-e5e5e5);
-  border-radius: 4px;
-  font-family: inherit;
 }
 
 .result-item.active {
@@ -513,6 +421,22 @@ watch(() => route.query, (query) => {
 
 .main {
   padding: 0;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header .title-row {
+  margin-bottom: 16px;
+}
+
+.header .title-row h1,
+.page.split .header .title-row {
+  margin: 0;
 }
 
 .search-toggle-bar {

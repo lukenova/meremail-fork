@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
+import { useWideLayout } from '@/composables/useWideLayout'
 import SetAsideFeed from '@/components/SetAsideFeed.vue'
 import FolderNav from '@/components/FolderNav.vue'
+
+// On wide screens the folders are in the sidebar beside the feed
+const wide = useWideLayout()
 
 onMounted(() => {
   document.title = 'Set Aside - MereMail'
@@ -12,7 +16,7 @@ onMounted(() => {
   <div class="page">
     <header class="header">
       <h1>Set Aside</h1>
-      <FolderNav active-queue="set_aside" />
+      <FolderNav v-if="!wide" active-queue="set_aside" />
     </header>
 
     <main class="main">

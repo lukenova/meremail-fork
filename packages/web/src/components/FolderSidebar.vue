@@ -1,15 +1,12 @@
 <script setup lang="ts">
-import { RouterLink, useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import SyncStatus from '@/components/SyncStatus.vue'
 import { useLiveQuery } from '@/local/live'
 import { getNavigation, type Navigation, type FolderNavItem } from '@/local/queries'
 import { uuid } from '@/local/uuid'
 
-defineProps<{
-  activeFolderId?: number
-  activeQueue?: 'reply_later' | 'set_aside'
-}>()
-
+const route = useRoute()
 const router = useRouter()
 const { data: nav } = useLiveQuery<Navigation>(getNavigation, { folders: [], replyLaterCount: 0, setAsideCount: 0 })
 
@@ -22,6 +19,17 @@ function icon(folder: FolderNavItem): string {
 function folderRoute(folder: FolderNavItem): string {
   return folder.id === 1 ? '/' : `/folder/${encodeURIComponent(folder.name.toLowerCase())}`
 }
+
+// The folder or queue being shown, from the page's address
+const activeFolderId = computed(() => {
+  if (route.path === '/') return 1
+  if (route.name !== 'folder') return null
+  const name = String(route.params.name ?? '').toLowerCase()
+  return nav.value.folders.find(f => f.name.toLowerCase() === name)?.id ?? null
+})
+const activeQueue = computed(() =>
+  route.path === '/reply-later' ? 'reply_later' : route.path === '/set-aside' ? 'set_aside' : null
+)
 
 function compose() {
   router.push(`/draft/${uuid()}`)
@@ -91,10 +99,10 @@ function compose() {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  min-width: 0;
   overflow-y: auto;
   padding: 16px 10px;
   background: var(--c-fafafa);
-  border-right: 1px solid var(--c-e5e5e5);
 }
 
 .brand {
@@ -169,7 +177,8 @@ function compose() {
   background: var(--c-f0f0f0);
 }
 
-.item.active {
+.item.active,
+.footer .item.router-link-active {
   background: var(--c-e5e7eb);
   color: var(--c-text-111111);
   font-weight: 600;

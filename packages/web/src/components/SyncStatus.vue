@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { db, getMeta } from '@/local/db'
 import { useLiveQuery } from '@/local/live'
-import { isSyncing, isOnline, serverUnreachable, syncError, syncNow } from '@/local/sync'
+import { isSyncing, isRefreshing, isOnline, serverUnreachable, syncError, refreshNow } from '@/local/sync'
 import { formatRelativeTime } from '@/utils/format'
 
 const { data: status } = useLiveQuery(async () => ({
@@ -23,6 +23,7 @@ onUnmounted(() => {
 const offline = computed(() => !isOnline.value || serverUnreachable.value)
 
 const label = computed(() => {
+  if (isRefreshing.value) return 'Checking mail…'
   if (isSyncing.value) return 'Syncing…'
   const last = status.value.lastSyncedAt
   const synced = last ? `Synced ${formatRelativeTime(last, now.value)}` : 'Not synced yet'
@@ -38,22 +39,22 @@ const title = computed(() => {
     lines.push(`${status.value.pending} change${status.value.pending > 1 ? 's' : ''} waiting to be sent`)
   }
   if (syncError.value) lines.push(syncError.value)
-  lines.push('Click to sync now')
+  lines.push('Click to check for new mail now')
   return lines.join('\n')
 })
 
 function sync() {
   now.value = Date.now()
-  syncNow()
+  void refreshNow()
 }
 </script>
 
 <template>
   <button
     class="sync-status"
-    :class="{ syncing: isSyncing, offline, error: !!syncError && !isSyncing }"
+    :class="{ syncing: isSyncing || isRefreshing, offline, error: !!syncError && !isSyncing }"
     :title="title"
-    :disabled="isSyncing"
+    :disabled="isSyncing || isRefreshing"
     @click="sync"
   >
     <svg class="sync-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

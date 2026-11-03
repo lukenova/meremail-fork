@@ -439,6 +439,31 @@ export function syncNow(): Promise<void> {
   return running
 }
 
+/** Whether a Refresh (mail server, then this device) is under way */
+export const isRefreshing = ref(false)
+
+/**
+ * Refresh now: have the server check the mail server for new mail and
+ * changes made in other mail apps, then bring this device up to date.
+ */
+export async function refreshNow(): Promise<void> {
+  if (isRefreshing.value) return
+  isRefreshing.value = true
+  try {
+    // Send our own changes first so the mail server gets them in this pass
+    await syncNow()
+    try {
+      await api<{ ran: boolean; finished: boolean }>('/api/sync/refresh', {})
+    } catch (e) {
+      // Offline or the server is busy: still sync what the server has
+      console.error('Mail server refresh failed:', e)
+    }
+    await syncNow()
+  } finally {
+    isRefreshing.value = false
+  }
+}
+
 let soonTimer: ReturnType<typeof setTimeout> | null = null
 
 function syncSoon(): void {

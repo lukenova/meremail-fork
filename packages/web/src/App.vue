@@ -3,6 +3,9 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import SyncFailures from '@/components/SyncFailures.vue'
 import BottomNav from '@/components/BottomNav.vue'
+import FolderSidebar from '@/components/FolderSidebar.vue'
+import PaneResizer from '@/components/PaneResizer.vue'
+import { usePaneWidth, SIDEBAR_WIDTH } from '@/composables/usePaneWidth'
 import { useWideLayout } from '@/composables/useWideLayout'
 import { useOffline, setNavigationHandler, initializeNotifications } from '@/composables/useOffline'
 import { onAuthRequired } from '@/local/sync'
@@ -13,9 +16,12 @@ const router = useRouter()
 
 const wide = useWideLayout()
 
+// Wide windows keep the folder sidebar on the left of every page
+const showSidebar = computed(() => wide.value && route.name !== undefined && !route.meta.public)
+const sidebarWidth = usePaneWidth('meremail.sidebarWidth', SIDEBAR_WIDTH, 170, 420)
+
 const showBottomNav = computed(() => {
-  // Wide mail pages have the folder sidebar instead
-  if (wide.value && (route.path === '/' || route.path.startsWith('/folder/'))) return false
+  if (showSidebar.value) return false
   // Show on main pages and any folder route
   if (['/', '/reply-later', '/set-aside', '/rules', '/folders', '/contacts', '/attachments'].includes(route.path)) return true
   if (route.path.startsWith('/folder/')) return true
@@ -49,8 +55,15 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="app-wrapper">
-    <RouterView />
+  <div
+    class="app-wrapper"
+    :class="{ shell: showSidebar }"
+    :style="showSidebar ? { gridTemplateColumns: `${sidebarWidth}px 1px minmax(0, 1fr)` } : undefined"
+  >
+    <FolderSidebar v-if="showSidebar" class="shell-sidebar" />
+    <PaneResizer v-if="showSidebar" v-model="sidebarWidth" class="shell-resizer" :min="170" :max="420" :default-width="SIDEBAR_WIDTH" />
+    <div v-if="showSidebar" class="shell-main"><RouterView /></div>
+    <RouterView v-else />
     <SyncFailures />
     <BottomNav v-if="showBottomNav" />
   </div>
@@ -75,5 +88,22 @@ body {
 
 .app-wrapper {
   position: relative;
+}
+
+/* Folders | page. The sidebar stays put while the page scrolls the window,
+   or, for the mail pages, scrolls its own list and reading panes. */
+.app-wrapper.shell {
+  display: grid;
+  align-items: start;
+}
+
+.shell-sidebar,
+.shell-resizer {
+  position: sticky;
+  top: 0;
+}
+
+.shell-main {
+  min-width: 0;
 }
 </style>
