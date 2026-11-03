@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { RouterLink } from 'vue-router'
+import { enqueue } from '@/local/actions'
 import { db } from '@/local/db'
 import { useLiveQuery } from '@/local/live'
 import { listFolderThreads, listReplyLater, type ThreadListItem } from '@/local/queries'
@@ -77,6 +78,117 @@ async function loadMore() {
   }
 }
 
+// ============== Selection ==============
+
+const TRASH_FOLDER_ID = 3
+
+const selecting = ref(false)
+const selected = ref(new Set<number>())
+const showMoveMenu = ref(false)
+const working = ref(false)
+
+const { data: allFolders } = useLiveQuery(() => db.folders.orderBy('position').toArray(), [])
+const moveTargets = computed(() => allFolders.value.filter(f => f.id !== props.folderId && f.id !== TRASH_FOLDER_ID))
+const inTrash = computed(() => props.folderId === TRASH_FOLDER_ID)
+
+/** Threads that can be selected (drafts have their own page and actions) */
+const selectableIds = computed(() => threads.value.filter(t => t.type !== 'draft').map(t => t.id as number))
+const allSelected = computed(() => selectableIds.value.length > 0 && selectableIds.value.every(id => selected.value.has(id)))
+
+// Forget threads that left the list (moved or deleted elsewhere)
+watch(selectableIds, (ids) => {
+  const present = new Set(ids)
+  const kept = [...selected.value].filter(id => present.has(id))
+  if (kept.length !== selected.value.size) selected.value = new Set(kept)
+})
+
+function startSelecting(id?: number) {
+  selecting.value = true
+  if (id !== undefined) selected.value = new Set([id])
+}
+
+function stopSelecting() {
+  selecting.value = false
+  showMoveMenu.value = false
+  selected.value = new Set()
+}
+
+function toggle(id: number) {
+  const next = new Set(selected.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selected.value = next
+}
+
+function toggleAll() {
+  selected.value = allSelected.value ? new Set() : new Set(selectableIds.value)
+}
+
+function onRowClick(thread: ThreadListItem) {
+  if (!selecting.value || thread.type === 'draft') return
+  toggle(thread.id as number)
+}
+
+// Right-click a row to start selecting on desktop
+function onContextMenu(event: MouseEvent, thread: ThreadListItem) {
+  if (selecting.value || thread.type === 'draft') return
+  event.preventDefault()
+  startSelecting(thread.id as number)
+}
+
+// Long-press a row to start selecting on touch screens
+let pressTimer: ReturnType<typeof setTimeout> | null = null
+let pressFired = false
+function onPressStart(thread: ThreadListItem) {
+  if (selecting.value || thread.type === 'draft') return
+  pressFired = false
+  pressTimer = setTimeout(() => {
+    pressFired = true
+    startSelecting(thread.id as number)
+    navigator.vibrate?.(20)
+  }, 500)
+}
+function onPressEnd(event?: Event) {
+  if (pressTimer) clearTimeout(pressTimer)
+  pressTimer = null
+  if (pressFired && event) {
+    event.preventDefault()
+    pressFired = false
+  }
+}
+
+async function run(each: (threadId: number) => Promise<void>) {
+  if (working.value || selected.value.size === 0) return
+  working.value = true
+  try {
+    for (const id of [...selected.value]) await each(id)
+    stopSelecting()
+  } finally {
+    working.value = false
+  }
+}
+
+function deleteSelected() {
+  const n = selected.value.size
+  if (inTrash.value) {
+    if (!confirm(`Delete ${n} conversation${n === 1 ? '' : 's'} forever? This also deletes ${n === 1 ? 'it' : 'them'} from the mail server.`)) return
+    return run(threadId => enqueue({ type: 'thread.delete', payload: { threadId } }))
+  }
+  return run(threadId => enqueue({ type: 'thread.trash', payload: { threadId } }))
+}
+
+function moveSelected(folderId: number) {
+  showMoveMenu.value = false
+  return run(threadId => enqueue({ type: 'thread.move', payload: { threadId, folderId } }))
+}
+
+async function markSelectedRead() {
+  if (working.value || selected.value.size === 0) return
+  const emails = await db.emails.where('threadId').anyOf([...selected.value]).filter(e => e.unread === 1).toArray()
+  if (emails.length) await enqueue({ type: 'emails.markRead', payload: { emailIds: emails.map(e => e.id) } })
+  stopSelecting()
+}
+
 function getParticipantDisplay(participants: ThreadListItem['participants']): string {
   if (participants.length === 0) return 'Unknown'
   const names = participants
@@ -109,7 +221,34 @@ onMounted(async () => {
       {{ emptyMessage || 'No threads' }}
     </div>
 
-    <ul v-if="threads.length > 0" class="thread-list">
+    <div v-if="threads.length > 0 && selectableIds.length > 0" class="select-bar" :class="{ active: selecting }">
+      <template v-if="!selecting">
+        <button class="select-btn" @click="startSelecting()">Select</button>
+      </template>
+      <template v-else>
+        <label class="select-all">
+          <input type="checkbox" :checked="allSelected" @change="toggleAll" />
+          <span>{{ selected.size }} selected</span>
+        </label>
+        <div class="select-actions">
+          <button class="bar-btn" :disabled="selected.size === 0 || working" @click="markSelectedRead">Mark read</button>
+          <div class="move-wrap">
+            <button class="bar-btn" :disabled="selected.size === 0 || working" @click="showMoveMenu = !showMoveMenu">Move to &#9662;</button>
+            <ul v-if="showMoveMenu" class="move-menu">
+              <li v-for="f in moveTargets" :key="f.id">
+                <button @click="moveSelected(f.id)">{{ f.name }}</button>
+              </li>
+            </ul>
+          </div>
+          <button class="bar-btn danger" :disabled="selected.size === 0 || working" @click="deleteSelected">
+            {{ inTrash ? 'Delete forever' : 'Delete' }}
+          </button>
+          <button class="bar-btn" @click="stopSelecting">Cancel</button>
+        </div>
+      </template>
+    </div>
+
+    <ul v-if="threads.length > 0" class="thread-list" :class="{ selecting }">
       <li
         v-for="thread in threads"
         :key="`${thread.type}-${thread.id}`"
@@ -118,12 +257,27 @@ onMounted(async () => {
           unread: thread.unreadCount > 0,
           'is-draft': thread.type === 'draft' && thread.draftCount > 0,
           'is-queued': thread.queuedCount > 0,
-          'has-draft': thread.type !== 'draft' && thread.draftCount > 0
+          'has-draft': thread.type !== 'draft' && thread.draftCount > 0,
+          selected: selecting && thread.type !== 'draft' && selected.has(thread.id as number)
         }"
       >
-        <RouterLink
-          :to="thread.type === 'draft' ? `/draft/${thread.id}` : `/thread/${thread.id}`"
+        <input
+          v-if="selecting && thread.type !== 'draft'"
+          type="checkbox"
+          class="row-check"
+          :checked="selected.has(thread.id as number)"
+          :aria-label="`Select ${thread.subject}`"
+          @change="toggle(thread.id as number)"
+        />
+        <component
+          :is="selecting && thread.type !== 'draft' ? 'div' : RouterLink"
+          v-bind="selecting && thread.type !== 'draft' ? {} : { to: thread.type === 'draft' ? `/draft/${thread.id}` : `/thread/${thread.id}` }"
           class="thread-link"
+          @click="onRowClick(thread)"
+          @touchstart.passive="onPressStart(thread)"
+          @touchend="onPressEnd($event)"
+          @touchmove.passive="onPressEnd()"
+          @contextmenu="onContextMenu($event, thread)"
         >
           <div class="thread-header">
             <span class="thread-participants">
@@ -147,7 +301,7 @@ onMounted(async () => {
           <div class="thread-snippet">
             {{ thread.snippet || '(No content)' }}
           </div>
-        </RouterLink>
+        </component>
       </li>
     </ul>
 
@@ -184,6 +338,126 @@ onMounted(async () => {
 
 .thread-item {
   border-bottom: 1px solid #f0f0f0;
+  position: relative;
+}
+
+.thread-list.selecting .thread-item {
+  display: flex;
+  align-items: center;
+}
+
+.thread-list.selecting .thread-link {
+  flex: 1;
+  min-width: 0;
+  padding-left: 8px;
+}
+
+.row-check {
+  margin-left: 20px;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.thread-item.selected {
+  background: #eff6ff;
+}
+
+.select-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-wrap: wrap;
+}
+
+.select-bar.active {
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #fff;
+}
+
+.select-btn,
+.bar-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 1px solid #e5e5e5;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+}
+
+.bar-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.bar-btn.danger {
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+}
+
+.select-all input {
+  width: 18px;
+  height: 18px;
+}
+
+.select-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.move-wrap {
+  position: relative;
+}
+
+.move-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  min-width: 180px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.move-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  font-size: 14px;
+  border: none;
+  background: none;
+  color: #333;
+  cursor: pointer;
+}
+
+.move-menu button:hover {
+  background: #f5f5f5;
 }
 
 .thread-item.unread .thread-participants {
@@ -210,6 +484,11 @@ onMounted(async () => {
   text-decoration: none;
   color: inherit;
   transition: background-color 0.1s ease;
+}
+
+div.thread-link {
+  cursor: pointer;
+  user-select: none;
 }
 
 .thread-link:hover {
