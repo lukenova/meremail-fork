@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { eq, sql } from 'drizzle-orm'
 import { db, folders, emailThreads, emails, deleteThreads } from '@meremail/shared'
+import { requestImapSync } from '../services/imap-sync'
 
 export const foldersRoutes = new Hono()
 
@@ -104,6 +105,7 @@ foldersRoutes.post('/', async (c) => {
     .returning()
     .get()
 
+  requestImapSync()
   return c.json({ folder: result }, 201)
 })
 
@@ -158,6 +160,7 @@ foldersRoutes.patch('/:id', async (c) => {
     .where(eq(folders.id, id))
     .get()
 
+  requestImapSync()
   return c.json({ folder: updatedFolder })
 })
 
@@ -193,9 +196,16 @@ foldersRoutes.delete('/:id', async (c) => {
 
   deleteThreads(threadIds)
 
+  // Threads in Trash that came from this folder restore to Inbox instead
+  db.update(emailThreads)
+    .set({ previousFolderId: null })
+    .where(eq(emailThreads.previousFolderId, id))
+    .run()
+
   // Delete folder
   db.delete(folders).where(eq(folders.id, id)).run()
 
+  requestImapSync()
   return c.json({ success: true, deletedThreads: threadIds.length })
 })
 

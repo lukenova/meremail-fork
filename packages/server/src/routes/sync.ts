@@ -10,6 +10,7 @@ import { db, config, draftAttachments, resolveAttachmentPath } from '@meremail/s
 import type { SyncAction, SyncDraftAttachment } from '@meremail/shared'
 import { bootstrap, changes, fetchThreads, folderPage } from '../sync/feed'
 import { applyActions } from '../sync/actions'
+import { requestImapSync } from '../services/imap-sync'
 
 export const syncRoutes = new Hono()
 export const draftAttachmentsRoutes = new Hono()
@@ -76,7 +77,9 @@ syncRoutes.post('/actions', async (c) => {
     return c.json({ error: `At most ${MAX_ACTIONS_PER_BATCH} actions per request` }, 400)
   }
 
-  return c.json({ results: applyActions(body.actions) })
+  const results = applyActions(body.actions)
+  requestImapSync()
+  return c.json({ results })
 })
 
 // PUT /api/draft-attachments/:id
