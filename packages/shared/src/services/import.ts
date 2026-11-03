@@ -292,8 +292,9 @@ function importEmailSync(email: ImportableEmail): { imported: boolean; reason?: 
     senderId = findOrCreateContact('unknown@unknown', 'Unknown Sender', false)
   }
 
-  // Determine folder: Junk emails go to Junk folder (id=2), others go to Inbox (id=1)
-  let folderId = email.isJunk ? 2 : 1
+  // Determine folder: Junk emails go to Junk (id=2); others go to the folder
+  // mapped to their IMAP folder, if any, else Inbox (id=1)
+  let folderId = email.isJunk ? 2 : (email.folderId ?? 1)
 
   // Evaluate rules to potentially override folder and other settings
   // Pass the target folder ID so rules are only evaluated if they apply to this folder

@@ -92,6 +92,11 @@ export interface ImportableEmail {
    * - Detecting "impostor" emails that spoof the user's address
    */
   isJunk: boolean
+  /**
+   * Meremail folder to file a new thread in, when the source folder is mapped
+   * to one (folders.imap_folder). Junk still wins, and rules can override it.
+   */
+  folderId?: number
 
   // === Attachments ===
   attachments: EmailAttachment[]

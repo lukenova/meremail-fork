@@ -3,6 +3,7 @@ import { join } from 'path'
 import { ImapFlow } from 'imapflow'
 import { simpleParser, ParsedMail } from 'mailparser'
 import { config } from '../config'
+import { sqlite } from '../db'
 import type { ImportableEmail, EmailAddress, EmailAttachment } from '../types/email'
 
 export interface FetchedEmail {
@@ -129,6 +130,28 @@ function convertAttachment(att: ParsedMail['attachments'][number]): EmailAttachm
 }
 
 /**
+ * The custom Meremail folder mapped to an IMAP folder (folders.imap_folder),
+ * if there is one. System folders are left out: Inbox is the default and
+ * Junk is decided by isJunk.
+ */
+export function folderIdForImapFolder(imapFolder: string): number | undefined {
+  const row = sqlite
+    .prepare('SELECT id FROM folders WHERE imap_folder = ? AND is_system = 0 ORDER BY id LIMIT 1')
+    .get(imapFolder) as { id: number } | undefined
+  return row?.id
+}
+
+/**
+ * IMAP folders mapped to custom Meremail folders, which are polled for new mail
+ */
+export function mappedImapFolders(): string[] {
+  const rows = sqlite
+    .prepare('SELECT DISTINCT imap_folder AS f FROM folders WHERE imap_folder IS NOT NULL AND is_system = 0')
+    .all() as { f: string }[]
+  return rows.map((r) => r.f)
+}
+
+/**
  * Convert IMAP FetchedEmail to source-agnostic ImportableEmail
  */
 export function toImportableEmail(fetched: FetchedEmail): ImportableEmail {
@@ -167,6 +190,7 @@ export function toImportableEmail(fetched: FetchedEmail): ImportableEmail {
     isRead: flags.has('\\Seen') || isSentFolder(folder),
     isSent: isSentFolder(folder),
     isJunk: isJunkFolder(folder),
+    folderId: folderIdForImapFolder(folder),
 
     // Attachments
     attachments: (parsed.attachments || []).map(convertAttachment),
