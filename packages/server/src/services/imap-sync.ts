@@ -582,7 +582,10 @@ export class ImapSync {
     }
 
     if (serverMoves.length) {
-      log(`${dry ? '[dry-run] Would move' : 'Moving'} ${serverMoves.length} message(s) on the server`)
+      const counts = new Map<string, number>()
+      for (const m of serverMoves) counts.set(`${m.from.folder} -> ${m.to}`, (counts.get(`${m.from.folder} -> ${m.to}`) || 0) + 1)
+      const summary = [...counts].map(([k, n]) => `${k}: ${n}`).join(', ')
+      log(`${dry ? '[dry-run] Would move' : 'Moving'} ${serverMoves.length} message(s) on the server (${summary})`)
       if (!dry) await this.moveOnServer(client, serverMoves)
     }
     if (movedLocally) log(`${dry ? '[dry-run] ' : ''}${movedLocally} thread(s) followed server moves`)
