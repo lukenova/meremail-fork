@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import SyncFailures from '@/components/SyncFailures.vue'
 import BottomNav from '@/components/BottomNav.vue'
+import { useWideLayout } from '@/composables/useWideLayout'
 import { useOffline, setNavigationHandler, initializeNotifications } from '@/composables/useOffline'
 import { onAuthRequired } from '@/local/sync'
 import { resetAuthState } from '@/auth'
@@ -10,7 +11,11 @@ import { resetAuthState } from '@/auth'
 const route = useRoute()
 const router = useRouter()
 
+const wide = useWideLayout()
+
 const showBottomNav = computed(() => {
+  // Wide mail pages have the folder sidebar instead
+  if (wide.value && (route.path === '/' || route.path.startsWith('/folder/'))) return false
   // Show on main pages and any folder route
   if (['/', '/reply-later', '/set-aside', '/rules', '/folders', '/contacts', '/attachments'].includes(route.path)) return true
   if (route.path.startsWith('/folder/')) return true

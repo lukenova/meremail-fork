@@ -13,10 +13,28 @@ import { uuid } from '@/local/uuid'
 import { retractNotification } from '@/composables/useOffline'
 import { goBackOr } from '@/utils/navigation'
 
+const props = defineProps<{
+  /** Shown in the reading pane next to the list instead of as its own page */
+  embedded?: boolean
+  /** The thread to show when embedded (otherwise it comes from the route) */
+  threadId?: number
+}>()
+
+const emit = defineEmits<{
+  /** Embedded: the thread was closed, trashed or deleted */
+  (e: 'close'): void
+}>()
+
 const route = useRoute()
 const router = useRouter()
 
-const threadId = computed(() => Number(route.params.id))
+const threadId = computed(() => props.threadId ?? Number(route.params.id))
+
+// Leave the thread: back to the list, or close the reading pane
+function leave(returnTo: string) {
+  if (props.embedded) emit('close')
+  else goBackOr(router, returnTo)
+}
 
 // The thread as held on this device; updates live as mail arrives or changes are made
 const { data: view, loaded } = useLiveQuery<{ thread: ThreadView | null; imageProxyUrl: string }>(async () => ({
@@ -204,7 +222,7 @@ async function handleTrashThread() {
   // Work out where to return to before the thread moves to Trash
   const returnTo = listRoute()
   await enqueue({ type: 'thread.trash', payload: { threadId: thread.value.id } })
-  goBackOr(router, returnTo)
+  leave(returnTo)
 }
 
 async function handleDeleteEmail(emailId: number) {
@@ -214,19 +232,20 @@ async function handleDeleteEmail(emailId: number) {
   const wasLast = emails.value.length === 1
   const returnTo = listRoute()
   await enqueue({ type: 'email.delete', payload: { emailId } })
-  if (wasLast) goBackOr(router, returnTo)
+  if (wasLast) leave(returnTo)
 }
 
 function goBack() {
-  goBackOr(router, listRoute())
+  leave(listRoute())
 }
 </script>
 
 <template>
-  <div class="thread-view">
+  <div class="thread-view" :class="{ embedded }">
     <header class="header">
       <div class="header-top">
-        <button class="back-link" @click="goBack">&larr; Back</button>
+        <button v-if="!embedded" class="back-link" @click="goBack">&larr; Back</button>
+        <span v-else></span>
         <div v-if="thread" class="header-actions">
           <button class="trash-btn" title="Move to Trash" @click="handleTrashThread">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -399,6 +418,10 @@ function goBack() {
 <style scoped>
 .thread-view {
   min-height: 100vh;
+}
+
+.thread-view.embedded {
+  min-height: 100%;
 }
 
 .header {

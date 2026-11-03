@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { enqueue } from '@/local/actions'
 import { db } from '@/local/db'
 import { useLiveQuery } from '@/local/live'
@@ -14,6 +14,15 @@ const props = defineProps<{
   queue?: 'reply_later'
   emptyMessage?: string
   unreadOnly?: boolean
+  /** Where a thread links to, instead of its own page (e.g. the reading pane) */
+  linkFor?: (threadId: number) => RouteLocationRaw
+  /** The thread open in the reading pane, highlighted in the list */
+  activeId?: number | null
+}>()
+
+const emit = defineEmits<{
+  /** The threads shown, in order - for stepping through them with the keyboard */
+  (e: 'threads', ids: number[]): void
 }>()
 
 // Folders that aren't kept offline are browsed straight from the server:
@@ -94,6 +103,13 @@ const inTrash = computed(() => props.folderId === TRASH_FOLDER_ID)
 /** Threads that can be selected (drafts have their own page and actions) */
 const selectableIds = computed(() => threads.value.filter(t => t.type !== 'draft').map(t => t.id as number))
 const allSelected = computed(() => selectableIds.value.length > 0 && selectableIds.value.every(id => selected.value.has(id)))
+
+watch(selectableIds, (ids) => emit('threads', ids), { immediate: true })
+
+function threadLink(thread: ThreadListItem): RouteLocationRaw {
+  if (thread.type === 'draft') return `/draft/${thread.id}`
+  return props.linkFor ? props.linkFor(thread.id as number) : `/thread/${thread.id}`
+}
 
 // Forget threads that left the list (moved or deleted elsewhere)
 watch(selectableIds, (ids) => {
@@ -258,7 +274,8 @@ onMounted(async () => {
           'is-draft': thread.type === 'draft' && thread.draftCount > 0,
           'is-queued': thread.queuedCount > 0,
           'has-draft': thread.type !== 'draft' && thread.draftCount > 0,
-          selected: selecting && thread.type !== 'draft' && selected.has(thread.id as number)
+          selected: selecting && thread.type !== 'draft' && selected.has(thread.id as number),
+          active: !selecting && thread.type !== 'draft' && activeId === thread.id
         }"
       >
         <input
@@ -271,7 +288,7 @@ onMounted(async () => {
         />
         <component
           :is="selecting && thread.type !== 'draft' ? 'div' : RouterLink"
-          v-bind="selecting && thread.type !== 'draft' ? {} : { to: thread.type === 'draft' ? `/draft/${thread.id}` : `/thread/${thread.id}` }"
+          v-bind="selecting && thread.type !== 'draft' ? {} : { to: threadLink(thread) }"
           class="thread-link"
           @click="onRowClick(thread)"
           @touchstart.passive="onPressStart(thread)"
@@ -358,6 +375,11 @@ onMounted(async () => {
   height: 18px;
   flex-shrink: 0;
   cursor: pointer;
+}
+
+.thread-item.active {
+  background: var(--c-eff6ff);
+  box-shadow: inset 3px 0 0 var(--c-2563eb);
 }
 
 .thread-item.selected {
@@ -484,6 +506,10 @@ onMounted(async () => {
   text-decoration: none;
   color: inherit;
   transition: background-color 0.1s ease;
+}
+
+.thread-link:focus:not(:focus-visible) {
+  outline: none;
 }
 
 div.thread-link {
