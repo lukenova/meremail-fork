@@ -19,6 +19,7 @@ import { authRoutes, requireAuth } from './routes/auth'
 import { startSendQueueProcessor } from './services/send-queue'
 import { startDailyScheduler } from './services/daily-scheduler'
 import { startImapIdle } from './services/imap-idle'
+import { startImapSync } from './services/imap-sync'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -83,6 +84,7 @@ serve({ fetch: app.fetch, port }, (info) => {
 
   // Start IMAP IDLE (instant email notifications)
   startImapIdle()
+  startImapSync()
 })
 
 export default app
